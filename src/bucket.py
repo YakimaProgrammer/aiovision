@@ -118,17 +118,3 @@ async def download_object(session, storage, bucket, name):
         return await session.as_service_account(req)
     except aiogoogle.excs.HTTPError:
         logging.exception("An exception occured when attempting to retrieve an object from the storage bucket")
-
-
-async def wait_for_object(session, storage, bucket, name, polling_interval=1):
-    while True:
-        await asyncio.sleep(polling_interval)
-        req = storage.objects.list(bucket=bucket)
-        resp = await session.as_service_account(req)
-        try:
-            for obj in resp["items"]:
-                if obj["name"] == name:
-                    return
-        except KeyError:
-            #This is an unreachable state. Still, weirder things have happened
-            pass
