@@ -1,9 +1,7 @@
 from PIL import Image
-import tempfile, asyncio, aiogoogle, logging, random
+import tempfile, asyncio, aiogoogle, logging, random, bucket
 
-CHARS = "qwertyuiopasdfghjklmnbvcxz1234567890QWERTYUIOPLKJHGFDSAZXCVBNM"
-
-def build_basic_request(gs_file_uri, destination_bucket, features="DOCUMENT_TEXT_DETECTION", batch_size=2000):
+def build_basic_request(gs_file_uri, destination_bucket, features="DOCUMENT_TEXT_DETECTION", batch_size=100):
     return {
         "requests": [
             {
@@ -22,129 +20,66 @@ def build_basic_request(gs_file_uri, destination_bucket, features="DOCUMENT_TEXT
                     "gcsDestination": {
                         "uri": destination_bucket
                     },
-                    #batch_size=2000 : Output all pages into one file
                     "batchSize": batch_size
                 }
             }
         ]
     }
 
-async def send_for_ocr(session, request):
-    vision = await session.discover("vision", "v1")
-    req = vision.images.asyncBatchAnnotate()
+async def send_for_ocr(session, vision, request):
+    req = vision.files.asyncBatchAnnotate()
     req.json = request
     
-    #response
-    return await auth.session.as_service_account(req)
-
-def convert_image(f, save_to): Image.open(f).save(save_to, "pdf")
-
-async def create_bucket(session, storage, bucket, project_id):
-    #attempt to create the bucket
-    req = storage.buckets.insert(project=project_id)
-    req.json = {
-        "name": bucket,
-        "location": "US-WEST1",
-        "storageClass": "STANDARD",
-        "iamConfiguration": {
-            "uniformBucketLevelAccess": {
-                "enabled": True
-            }
-        }
-    }
-
     try:
-        resp = await session.as_service_account(req)
+        return await session.as_service_account(req)
     except aiogoogle.excs.HTTPError as e:
-        if e.res.status_code == 409 and "already own" in e.res.error_msg:      
-            pass #Do nothing, resource already exists
-        
-        elif e.res.status_code == 403:
-            print("Cannot create storage bucket (insufficent permissions)")
-
-        elif e.res.status_code == 409 and "not available" in e.res.error_msg:
-            print(f"Cannot create storage bucket (someone else already has a bucket named {bucket})")
-
-        else:
-            logging.exception("An exception occured when attempting to create the storage bucket")
-
-def generate_name(name_len=16):
-    return "".join(random.choice(CHARS) for _ in range(name_len))
-
-async def get_available_name(session, storage, bucket):
-    #Technically, this function should be useless because I'm using a namespace with 62**16 possible names
-    req = storage.objects.list(bucket=bucket)
-    try:
-        resp = await session.as_service_account(req)
-    except aiogoogle.excs.HTTPError:
-        logging.exception("An exception occured when attempting to list the objects in the storage bucket")
-
-    #Technically, I'm blocking the event loop here
-    try:
-        while True:
-            name = generate_name() + ".pdf"
-            for obj in resp["items"]:
-                if obj["name"] == name:
-                    break
-
-            #for-else only runs if break doesn't get called
-            else:
-                return name
-
-    #There are no objects in the bucket yet
-    except KeyError:
-        #I mean, I already generated a name before the exception happened
-        return name 
-
-async def upload_file_to_bucket(session, storage, bucket, project_id, f, name):
-    f.seek(0)
-    
-    req = storage.objects.insert(bucket=bucket, name=name, contentEncoding="application/pdf")
-    req.data = f.read()
-
-
-    #I can SEE /upload/storage in the discovery docs
-    #I just can't activate it!
-    #Well, you CAN always do this...
-    req.url = 'https://storage.googleapis.com/upload/storage/' + req.url[39:]
-    
-    try:
-        resp = await session.as_service_account(req)
-    except aiogoogle.excs.HTTPError:
-        logging.exception("An error occured when uploading an object to the bucket")
         breakpoint()
-        print()
-
-async def upload_to_bucket(session, storage, bucket, project_id, f, loop, executor):
-    #ensures that the bucket exists in the first place
-    await create_bucket(session, storage, bucket, project_id)
-
-    #Start processing the image
-    if not loop:
-        loop = asyncio.get_running_loop()
+        logging.exception("Unable to submit ocr task")
         
-    with tempfile.TemporaryFile() as tf:
-        #Because blocking the event loop is a very bad thing
-        await loop.run_in_executor(executor, convert_image, f, tf)
+async def wait_for_operation_to_be_complete(session, vision, name, polling_interval=1):
+    name = "/".join(name.split("/")[-2:]) #projects/my-google-apis-project-123/operation/123456789abcdef -> operation/123456789abcdef
 
-        name = await get_available_name(session, storage, bucket)
-        
-        await upload_file_to_bucket(session, storage, bucket, project_id, tf, name)
+    running = True
+    while running:
+        await asyncio.sleep(polling_interval)
+        try:
+            req = vision.operations.get(name=name)
+            #It tries to be helpful and encode slash charecters automatically
+            #Usually that is what you want.
+            #But not in this case
+            req.url = req.url.replace("%2F","/")
+            resp = await session.as_service_account(req)
+            
+            if resp["metadata"]["state"] == "DONE":
+                running = False
+            
+        except aiogoogle.excs.HTTPError:
+            logging.exception("Unable to poll ocr task for completion")
 
-    return name
-
-async def delete_object(session, storage, bucket, obj):
-    req = storage.objects.delete(bucket=bucket, object=obj)
-    resp = await session.as_service_account(req)
+async def detect_text_in_file(session, bucket_name, files, ocr_request = None, project_id = None, loop = None, executor = None):
+    storage = await session.discover("storage","v1")
+    vision = await session.discover("vision", "v1")
     
-async def detect_text_in_file(session, bucket, f, project_id = None, loop = None, executor = None):
-    storage = await session.discover("storage", "v1")
-                        
     if not project_id:
         project_id = session.service_account_creds.project_id
         
-    obj_name = await upload_to_bucket(session, storage, bucket, project_id, f, loop, executor)
-    await delete_object(session, storage, bucket, obj_name)
+    obj_name = await bucket.upload_files_to_bucket_as_pdf(session, storage, bucket_name, project_id, files, loop, executor)
+
+    if not ocr_request:
+        ocr_request = build_basic_request(f"gs://{bucket_name}/{obj_name}", f"gs://{bucket_name}/{obj_name}-")
+
+    resp = await send_for_ocr(session, vision, ocr_request)
+        
+    await wait_for_operation_to_be_complete(session, vision, resp["name"])
+    output_name = f"{obj_name}-output-1-to-1.json"
+    
+    resp = await bucket.download_object(session, storage, bucket_name, output_name)
+
+    #It actually takes the same amount of time to do this sequentially as it would with asyncio.gather
+    await bucket.delete_object(session, storage, bucket_name, obj_name)
+    await bucket.delete_object(session, storage, bucket_name, output_name)
+
+    return resp
         
 if __name__ == "__main__":
     import auth, json, asyncio
@@ -153,4 +88,4 @@ if __name__ == "__main__":
         session = auth.SessionManager(json.load(f))
         
     with open("C:/Users/magnu/Downloads/picture.jpg","rb") as f:
-        asyncio.run(detect_text_in_file(session, "magnusfulton-com-ocr", f))
+        resp = asyncio.run(detect_text_in_file(session, "magnusfulton-com-ocr", f))
