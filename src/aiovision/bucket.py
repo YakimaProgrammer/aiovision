@@ -28,20 +28,17 @@ async def create_bucket(session, storage, bucket, project_id):
         
         elif e.res.status_code == 403:
             print("Cannot create storage bucket (insufficent permissions)")
+            raise
 
         elif e.res.status_code == 409 and "not available" in e.res.error_msg:
             print(f"Cannot create storage bucket (someone else already has a bucket named {bucket})")
+            raise
 
-        else:
-            logging.exception("An exception occured when attempting to create the storage bucket")
 
 async def get_available_name(session, storage, bucket):
     #Technically, this function should be useless because I'm using a namespace with 62**16 possible names
     req = storage.objects.list(bucket=bucket)
-    try:
-        resp = await session.as_service_account(req)
-    except aiogoogle.excs.HTTPError:
-        logging.exception("An exception occured when attempting to list the objects in the storage bucket")
+    resp = await session.as_service_account(req)
 
     #Technically, I'm blocking the event loop here
     try:
@@ -76,10 +73,7 @@ async def upload_to_bucket(session, storage, bucket, project_id, f, name):
     #Well, you CAN always do this...
     req.url = 'https://storage.googleapis.com/upload/storage/' + req.url[39:]
     
-    try:
-        resp = await session.as_service_account(req)
-    except aiogoogle.excs.HTTPError:
-        logging.exception("An error occured when uploading an object to the bucket")
+    resp = await session.as_service_account(req)
 
     if close_f:
         f.close()
@@ -104,21 +98,15 @@ async def upload_files_to_bucket_as_pdf(session, storage, bucket, project_id, f,
 
 async def delete_object(session, storage, bucket, name):
     req = storage.objects.delete(bucket=bucket, object=name)
-    try:
-        resp = await session.as_service_account(req)
-    except aiogoogle.excs.HTTPError:
-        logging.exception("An exception occured when attempting to delete an object in the storage bucket")
+    resp = await session.as_service_account(req)
 
 
 async def download_object(session, storage, bucket, name):
     req = storage.objects.get(bucket=bucket, object=name)
     #"Functions with leading underscores were made to be called out of context" - YakimaProgrammer (TM)(R)(C)(Patent Pending)
     req._add_query_param({"alt":"media"})
-    
-    try:
-        return await session.as_service_account(req)
-    except aiogoogle.excs.HTTPError:
-        logging.exception("An exception occured when attempting to retrieve an object from the storage bucket")
+
+    return await session.as_service_account(req)
 
 async def get_output_files(session, storage, bucket, name):
     req = storage.objects.list(bucket=bucket)

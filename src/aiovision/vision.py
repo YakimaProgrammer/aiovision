@@ -50,14 +50,13 @@ async def send_for_ocr(session, vision, request, sync = False):
         req = vision.files.asyncBatchAnnotate()
     req.json = request
     
-    try:
-        return await session.as_service_account(req)
-    except aiogoogle.excs.HTTPError as e:
-        logging.exception("Unable to submit ocr task")
+    return await session.as_service_account(req)
         
 async def wait_for_operation_to_be_complete(session, vision, name, polling_interval=1):
     name = "/".join(name.split("/")[-2:]) #projects/my-google-apis-project-123/operation/123456789abcdef -> operation/123456789abcdef
 
+    failed = 0
+    
     running = True
     while running:
         await asyncio.sleep(polling_interval)
@@ -73,7 +72,10 @@ async def wait_for_operation_to_be_complete(session, vision, name, polling_inter
                 running = False
             
         except aiogoogle.excs.HTTPError:
-            logging.exception("Unable to poll ocr task for completion")
+            #I've never had this fail before, but I don't want it to bail too soon or keep trying forever
+            failed += 1
+            if failed > 3:
+                raise
 
 async def detect_text_in_files_bulk(session, bucket_name, files, ocr_request = None, project_id = None, loop = None, executor = None):
     storage = await session.discover("storage","v1")
