@@ -89,14 +89,16 @@ async def detect_text_in_files_bulk(session, bucket_name, files, ocr_request = N
     resp = await send_for_ocr(session, vision, ocr_request)
         
     await wait_for_operation_to_be_complete(session, vision, resp["name"])
-    output_name = f"{obj_name}-output-1-to-1.json"
+
+    output_files = await bucket.get_output_files(session, storage, bucket_name, obj_name)
+
+    resp = await asyncio.gather(*(bucket.download_object(session, storage, bucket_name, name) for name in output_files))
+
+    await asyncio.gather(
+        bucket.delete_object(session, storage, bucket_name, obj_name),
+        *(bucket.delete_object(session, storage, bucket_name, name) for name in output_files)
+    )
     
-    resp = await bucket.download_object(session, storage, bucket_name, output_name)
-
-    #It actually takes the same amount of time to do this sequentially as it would with asyncio.gather
-    await bucket.delete_object(session, storage, bucket_name, obj_name)
-    await bucket.delete_object(session, storage, bucket_name, output_name)
-
     return resp
 
 async def detect_text_in_file(session, f, ocr_request = None):
@@ -113,11 +115,3 @@ async def detect_text_in_file(session, f, ocr_request = None):
         ocr_request = build_basic_sync_request(base64_data)
 
     return await send_for_ocr(session, vision, ocr_request, True)
-    
-if __name__ == "__main__":
-    import auth, json, asyncio
-
-    with open("../google-apis-key.json") as f:
-        session = auth.SessionManager(json.load(f))
-        
-    resp = asyncio.run(detect_text_in_file(session, "C:/Users/magnu/Downloads/picture.jpg"))

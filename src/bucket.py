@@ -118,3 +118,16 @@ async def download_object(session, storage, bucket, name):
         return await session.as_service_account(req)
     except aiogoogle.excs.HTTPError:
         logging.exception("An exception occured when attempting to retrieve an object from the storage bucket")
+
+async def get_output_files(session, storage, bucket, name):
+    req = storage.objects.list(bucket=bucket)
+    resp = await session.as_service_account(req)
+    try:
+        files = []
+        for obj in resp["items"]:
+            if obj["name"].startswith(name) and obj["name"] != name:
+                files.append(obj["name"])
+
+        return files
+    except KeyError:
+        return []
