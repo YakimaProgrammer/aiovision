@@ -1,5 +1,5 @@
 from PIL import Image
-import tempfile, asyncio, aiogoogle, logging, random, bucket
+import tempfile, asyncio, aiogoogle, logging, random, bucket, preprocess, base64
 
 def build_basic_request(gs_file_uri, destination_bucket, features="DOCUMENT_TEXT_DETECTION", batch_size=100):
     return {
@@ -26,14 +26,32 @@ def build_basic_request(gs_file_uri, destination_bucket, features="DOCUMENT_TEXT
         ]
     }
 
-async def send_for_ocr(session, vision, request):
-    req = vision.files.asyncBatchAnnotate()
+def build_basic_sync_request(base64_data, features="DOCUMENT_TEXT_DETECTION"):
+    return {
+        "requests": [
+            {
+                "image": {
+                    "content": base64_data
+                },
+                "features": [
+                    {
+                        "type": features
+                    }
+                ]
+            }
+        ]
+    }
+
+async def send_for_ocr(session, vision, request, sync = False):
+    if sync:
+        req = vision.images.annotate()
+    else:
+        req = vision.files.asyncBatchAnnotate()
     req.json = request
     
     try:
         return await session.as_service_account(req)
     except aiogoogle.excs.HTTPError as e:
-        breakpoint()
         logging.exception("Unable to submit ocr task")
         
 async def wait_for_operation_to_be_complete(session, vision, name, polling_interval=1):
@@ -56,7 +74,7 @@ async def wait_for_operation_to_be_complete(session, vision, name, polling_inter
         except aiogoogle.excs.HTTPError:
             logging.exception("Unable to poll ocr task for completion")
 
-async def detect_text_in_file(session, bucket_name, files, ocr_request = None, project_id = None, loop = None, executor = None):
+async def detect_text_in_files_bulk(session, bucket_name, files, ocr_request = None, project_id = None, loop = None, executor = None):
     storage = await session.discover("storage","v1")
     vision = await session.discover("vision", "v1")
     
@@ -80,12 +98,26 @@ async def detect_text_in_file(session, bucket_name, files, ocr_request = None, p
     await bucket.delete_object(session, storage, bucket_name, output_name)
 
     return resp
-        
+
+async def detect_text_in_file(session, f, ocr_request = None):
+    vision = await session.discover("vision", "v1")
+    
+    try:
+        f.seek(0)
+        base64_data = base64.b64encode(f.read()).decode()        
+    except AttributeError:
+        with open(f,"rb") as f_asfile:
+            base64_data = base64.b64encode(f_asfile.read()).decode()
+    
+    if not ocr_request:
+        ocr_request = build_basic_sync_request(base64_data)
+
+    return await send_for_ocr(session, vision, ocr_request, True)
+    
 if __name__ == "__main__":
     import auth, json, asyncio
 
     with open("../google-apis-key.json") as f:
         session = auth.SessionManager(json.load(f))
         
-    with open("C:/Users/magnu/Downloads/picture.jpg","rb") as f:
-        resp = asyncio.run(detect_text_in_file(session, "magnusfulton-com-ocr", f))
+    resp = asyncio.run(detect_text_in_file(session, "C:/Users/magnu/Downloads/picture.jpg"))
