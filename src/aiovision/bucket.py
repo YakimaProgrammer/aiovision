@@ -1,4 +1,5 @@
-import tempfile, asyncio, aiogoogle, logging, random, preprocess
+import tempfile, asyncio, aiogoogle, logging, random
+from . import preprocess
 
 CHARS = "qwertyuiopasdfghjklmnbvcxz1234567890QWERTYUIOPLKJHGFDSAZXCVBNM"
 

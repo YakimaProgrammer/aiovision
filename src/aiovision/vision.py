@@ -1,5 +1,6 @@
 from PIL import Image
-import tempfile, asyncio, aiogoogle, logging, random, bucket, preprocess, base64
+import tempfile, asyncio, aiogoogle, logging, random, base64
+from . import bucket, preprocess
 
 def build_basic_request(gs_file_uri, destination_bucket, features="DOCUMENT_TEXT_DETECTION", batch_size=100):
     return {
