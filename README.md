@@ -14,7 +14,7 @@ If you have not already done so, [create a service account](https://cloud.google
 ```python
 import aiovision, json, asyncio
 with open("/path/to/creds.json") as creds, open("/path/to/pdf.pdf","rb") as pdf:
-    session = aiovision.SessionManager(**json.load(creds))
+    session = aiovision.SessionManager(json.load(creds))
     req = aiovision.detect_text_in_files_bulk(
         session,
         "my-globally-unique-bucket-name",
@@ -28,7 +28,7 @@ with open("/path/to/creds.json") as creds, open("/path/to/pdf.pdf","rb") as pdf:
 ```python
 import aiovision, json, asyncio
 with open("/path/to/creds.json") as creds:
-    session = aiovision.SessionManager(**json.load(creds))
+    session = aiovision.SessionManager(json.load(creds))
     req = aiovision.detect_text_in_file(
         session,
         "/path/to/another/image.jpg"
@@ -37,5 +37,5 @@ with open("/path/to/creds.json") as creds:
 ```
 *resp* will be in the form {"responses": [[annotations](https://cloud.google.com/vision/docs/reference/rest/v1/AnnotateImageResponse)]}.
 ****
-# Pricing
+# Google APIs Pricing Info
 Aiovision uses Cloud Vision's *Document Text Detection*, with pricing information available [here](https://cloud.google.com/vision/pricing). Aiovision also relies on Google Cloud Storage for batch request processing, with the pricing information for that service available [here](https://cloud.google.com/storage/pricing). However for most small use cases (less than a thousand requests per month), usage of these APIs will most likely be free.
